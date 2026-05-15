@@ -43,6 +43,12 @@ user_params:
     max_lag: 24
     lr: 0.001
     epochs: 1
+  transformer:
+    n_hidden: 32
+    infc: null
+    max_lag: 24
+    lr: 0.001
+    epochs: 1
 
 # ── Forecasting ───────────────────────────────────────────────
 forecasting:
