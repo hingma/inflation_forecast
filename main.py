@@ -29,7 +29,7 @@ RESULTS = Path("results")
 RESULTS.mkdir(exist_ok=True)
 (RESULTS / "figures").mkdir(exist_ok=True)
 
-MODEL_TYPES_NN   = ["ar", "nn", "lstm"]
+MODEL_TYPES_NN   = ["ar", "nn", "lstm", "transformer"]
 MODEL_TYPES_BENCH = ["rw", "sarima", "ms_ar"]
 ALL_MODELS       = MODEL_TYPES_NN + MODEL_TYPES_BENCH
 
@@ -316,7 +316,7 @@ def run_sensitivity(y_train: np.ndarray, best_params: dict,
             y_tr = np.concatenate([y_train[:val_start], y_train[val_start + n_val:]])
             y_va = y_train[val_start: val_start + n_val]
             p = select_lags(y_tr, params.get("infc"), params["max_lag"])
-            if mt == "lstm":
+            if mt in ("lstm", "transformer"):
                 X_tr, Y_tr = make_lstm_sequence(y_tr, p)
                 X_full, Y_full = make_lstm_sequence(np.concatenate([y_tr, y_va]), p)
             else:
@@ -340,7 +340,7 @@ def run_sensitivity(y_train: np.ndarray, best_params: dict,
     ]
 
     results = []
-    for mt in ["nn", "lstm"]:
+    for mt in ["nn", "lstm", "transformer"]:
         if not best_params.get(mt):
             continue
         for param_name, key, vals in grid:
@@ -388,7 +388,7 @@ def _train_and_save_model(mt: str, y_train: np.ndarray, params: dict,
     p        = select_lags(y_train, params.get("infc"), params["max_lag"])
     n_hidden = params.get("n_hidden", 50)
 
-    if mt == "lstm":
+    if mt in ("lstm", "transformer"):
         X, Y = make_lstm_sequence(y_train, p)
     else:
         X, Y = make_lag_matrix(y_train, p)
@@ -416,7 +416,7 @@ def run_lrp(y: pd.Series, best_params: dict, label: str, cfg: "Cfg"):
     y_train    = y[TRAIN_START:TRAIN_END].values.astype(np.float32)
     models_dir = cfg.results_dir / "models"
 
-    for mt in ["ar", "nn", "lstm"]:
+    for mt in ["ar", "nn", "lstm", "transformer"]:
         params = best_params.get(mt)
         if params is None:
             continue
@@ -436,7 +436,7 @@ def run_lrp(y: pd.Series, best_params: dict, label: str, cfg: "Cfg"):
         p = meta["p"]
 
         # ── Prediction / LRP phase ────────────────────────────────────────────
-        if mt == "lstm":
+        if mt in ("lstm", "transformer"):
             X, _ = make_lstm_sequence(y_train, p)
         else:
             X, _ = make_lag_matrix(y_train, p)
@@ -445,11 +445,11 @@ def run_lrp(y: pd.Series, best_params: dict, label: str, cfg: "Cfg"):
             x_inp = X[idx]
             with torch.no_grad():
                 xt = torch.tensor(x_inp, dtype=torch.float32).unsqueeze(0)
-                if mt == "lstm":
+                if mt in ("lstm", "transformer"):
                     xt = xt.unsqueeze(-1)
                 y_pred = model(xt).item()
             rel    = compute_lrp(model, x_inp, mt)
-            x_plot = x_inp[::-1] if mt == "lstm" else x_inp
+            x_plot = x_inp[::-1] if mt in ("lstm", "transformer") else x_inp
             plot_lrp(rel, x_plot, y_pred, mt, p, save=cfg.save_figures,
                      fname_suffix=f"_{label}_ex{i+1}")
 

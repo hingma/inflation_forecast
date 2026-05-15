@@ -19,7 +19,7 @@ from typing import Callable
 import torch
 
 from data import make_lag_matrix, make_lstm_sequence, select_lags
-from models import ARModel, NNModel, LSTMModel, build_model, train_model
+from models import ARModel, NNModel, LSTMModel, TransformerModel, build_model, train_model
 
 
 H_MAX = 12
@@ -144,7 +144,8 @@ def _nn_forecast_at_origin(model_type: str, params: dict,
                            y_avail: np.ndarray,
                            device: str = "cpu") -> np.ndarray:
     p = select_lags(y_avail, params.get("infc"), params["max_lag"])
-    if model_type == "lstm":
+    seq_model = model_type in ("lstm", "transformer")
+    if seq_model:
         X, Y = make_lstm_sequence(y_avail, p)
     else:
         X, Y = make_lag_matrix(y_avail, p)
@@ -153,7 +154,7 @@ def _nn_forecast_at_origin(model_type: str, params: dict,
     model = train_model(model, X, Y, lr=params["lr"],
                         epochs=params["epochs"], device=device)
 
-    if model_type == "lstm":
+    if seq_model:
         return _iter_forecast_lstm(model, y_avail, p, H_MAX, device)
     else:
         return _iter_forecast_nn(model, y_avail, p, H_MAX, device)

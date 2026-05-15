@@ -24,9 +24,10 @@ from models import build_model, train_model, model_msfe
 # NN  : Table 4, rank-1 — n=20, infc=bic, max_lag=12, LR=0.001, epochs=500
 # LSTM: Table 5, rank-1 — n=50, infc=None, max_lag=24, LR=0.001, epochs=2000
 PAPER_BEST_PARAMS: dict[str, dict] = {
-    "ar":   {"infc": None,   "max_lag": 24, "lr": 0.003, "epochs": 500},
-    "nn":   {"n_hidden": 20, "infc": "bic", "max_lag": 12, "lr": 0.001, "epochs": 500},
-    "lstm": {"n_hidden": 50, "infc": None,  "max_lag": 24, "lr": 0.001, "epochs": 2000},
+    "ar":          {"infc": None,   "max_lag": 24, "lr": 0.003, "epochs": 500},
+    "nn":          {"n_hidden": 20, "infc": "bic", "max_lag": 12, "lr": 0.001, "epochs": 500},
+    "lstm":        {"n_hidden": 50, "infc": None,  "max_lag": 24, "lr": 0.001, "epochs": 2000},
+    "transformer": {"n_hidden": 32, "infc": None,  "max_lag": 24, "lr": 0.001, "epochs": 1000},
 }
 
 
@@ -53,6 +54,13 @@ GRIDS: dict[str, dict[str, list]] = {
         "lr":       [0.001, 0.010, 0.050, 0.100, 0.300],
         "epochs":   [500, 1000, 1500, 2000],
     },
+    "transformer": {
+        "n_hidden": [16, 24, 32],
+        "infc":     [None, "bic"],
+        "max_lag":  [12, 24],
+        "lr":       [0.001, 0.003, 0.010, 0.050],
+        "epochs":   [500, 1000, 1500, 2000],
+    },
 }
 
 # Smaller grid for quick smoke-test (set QUICK=True in main.py)
@@ -77,6 +85,13 @@ QUICK_GRIDS: dict[str, dict[str, list]] = {
         "lr":       [0.001, 0.010, 0.050],
         "epochs":   [500, 1000],
     },
+    "transformer": {
+        "n_hidden": [16, 32],
+        "infc":     [None, "bic"],
+        "max_lag":  [12, 24],
+        "lr":       [0.001, 0.010],
+        "epochs":   [500, 1000],
+    },
 }
 
 
@@ -88,7 +103,7 @@ def _param_combos(grid: dict[str, list]) -> list[dict]:
 
 
 def _make_features(y: np.ndarray, p: int, model_type: str):
-    if model_type == "lstm":
+    if model_type in ("lstm", "transformer"):
         return make_lstm_sequence(y, p)
     return make_lag_matrix(y, p)
 

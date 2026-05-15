@@ -13,7 +13,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from models import NNModel, LSTMModel
+from models import NNModel, LSTMModel, TransformerModel
 
 
 EPS = 1e-9
@@ -115,6 +115,30 @@ def lrp_ar(model, x: np.ndarray) -> np.ndarray:
     return R.astype(np.float32)
 
 
+# ── Transformer LRP (gradient × input approximation) ─────────────────────────
+
+def lrp_transformer(model: TransformerModel, x: np.ndarray) -> np.ndarray:
+    """
+    Gradient × input relevance for Transformer.
+
+    Parameters
+    ----------
+    model : trained TransformerModel
+    x     : (p,) input sequence [oldest, ..., most recent]  (lag-p, ..., lag-1)
+
+    Returns
+    -------
+    R_input : (p,) relevance per time step, oldest first.
+    """
+    model.eval()
+    xt = torch.tensor(x, dtype=torch.float32).unsqueeze(0).unsqueeze(-1)
+    xt.requires_grad_(True)
+    out = model(xt)
+    out.backward()
+    grad = xt.grad.detach().squeeze().numpy()  # (p,)
+    return (grad * x).astype(np.float32)
+
+
 # ── Dispatch ──────────────────────────────────────────────────────────────────
 
 def compute_lrp(model: nn.Module, x: np.ndarray,
@@ -122,8 +146,8 @@ def compute_lrp(model: nn.Module, x: np.ndarray,
     """
     Compute input-level relevances for a single input vector x.
 
-    For AR/NN: x = [lag-1, ..., lag-p]
-    For LSTM:  x = [lag-p, ..., lag-1]  (oldest first)
+    For AR/NN:          x = [lag-1, ..., lag-p]
+    For LSTM/Transformer: x = [lag-p, ..., lag-1]  (oldest first)
     """
     if model_type == "ar":
         return lrp_ar(model, x)
@@ -131,6 +155,8 @@ def compute_lrp(model: nn.Module, x: np.ndarray,
         return lrp_nn(model, x)
     elif model_type == "lstm":
         return lrp_lstm(model, x)
+    elif model_type == "transformer":
+        return lrp_transformer(model, x)
     else:
         raise ValueError(f"Unknown model_type: {model_type}")
 

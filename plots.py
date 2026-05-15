@@ -11,12 +11,13 @@ FIG_DIR = Path("results/figures")
 FIG_DIR.mkdir(parents=True, exist_ok=True)
 
 MODEL_STYLES = {
-    "rw":     dict(label="RW",    color="green",  ls="-"),
-    "ar":     dict(label="AR",    color="red",    ls="--"),
-    "nn":     dict(label="NN",    color="blue",   ls="--"),
-    "lstm":   dict(label="LSTM",  color="cyan",   ls="-"),
-    "ms_ar":  dict(label="MS-AR", color="purple", ls="--"),
-    "sarima": dict(label="SARIMA",color="orange", ls="--"),
+    "rw":          dict(label="RW",          color="green",      ls="-"),
+    "ar":          dict(label="AR",          color="red",        ls="--"),
+    "nn":          dict(label="NN",          color="blue",       ls="--"),
+    "lstm":        dict(label="LSTM",        color="cyan",       ls="-"),
+    "transformer": dict(label="Transformer", color="darkorange", ls="-"),
+    "ms_ar":       dict(label="MS-AR",       color="purple",     ls="--"),
+    "sarima":      dict(label="SARIMA",      color="orange",     ls="--"),
 }
 
 
@@ -215,7 +216,7 @@ def plot_lrp(
     lags = np.arange(-p + 1, 1)        # -p+1, ..., 0  (0 = lag-1)
     # For NN/AR: relevances[0] = lag-1, relevances[-1] = lag-p → align
     # For LSTM: relevances[0] = lag-p, relevances[-1] = lag-1 → reverse
-    if model_type == "lstm":
+    if model_type in ("lstm", "transformer"):
         rel = relevances[::-1]          # now index 0 = lag-1
     else:
         rel = relevances
@@ -225,7 +226,7 @@ def plot_lrp(
 
     fig, ax = plt.subplots(figsize=(7, 3.5))
     # Actual input series (black line)
-    ax.plot(lags, y_input[::-1] if model_type != "lstm" else y_input,
+    ax.plot(lags, y_input[::-1] if model_type not in ("lstm", "transformer") else y_input,
             "k-", linewidth=1.2)
     # Predicted value (dashed)
     ax.axhline(y_pred, color="k", ls="--", linewidth=0.8, alpha=0.6)

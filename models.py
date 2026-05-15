@@ -73,6 +73,39 @@ class LSTMModel(nn.Module):
         return self.fc(out[:, -1, :]).squeeze(-1)
 
 
+class TransformerModel(nn.Module):
+    """
+    Single-layer Transformer encoder for time-series forecasting.
+    Each lag is a token fed oldest-first (same convention as LSTM).
+    d_model = n_hidden, dim_feedforward = 2 * n_hidden, n_heads = 2.
+    Input: (batch, seq_len) or (batch, seq_len, 1).
+    Output: scalar from mean-pooled encoder output.
+    n_hidden must be even (divisible by n_heads=2).
+    Param count ≈ 8 641 at n_hidden=32 (cf. LSTM ≈ 10 651 at n_hidden=50).
+    """
+    def __init__(self, n_hidden: int):
+        super().__init__()
+        d_model = n_hidden
+        self.input_proj = nn.Linear(1, d_model)
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=d_model,
+            nhead=2,
+            dim_feedforward=d_model * 2,
+            dropout=0.0,
+            batch_first=True,
+        )
+        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=1)
+        self.fc = nn.Linear(d_model, 1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if x.dim() == 2:
+            x = x.unsqueeze(-1)    # (batch, seq, 1)
+        x = self.input_proj(x)     # (batch, seq, d_model)
+        x = self.encoder(x)        # (batch, seq, d_model)
+        x = x.mean(dim=1)          # (batch, d_model)  mean pooling
+        return self.fc(x).squeeze(-1)
+
+
 # ── Training ──────────────────────────────────────────────────────────────────
 
 def train_model(
@@ -122,5 +155,7 @@ def build_model(model_type: str, p: int, n_hidden: int = 50) -> nn.Module:
         return NNModel(p, n_hidden)
     elif model_type == "lstm":
         return LSTMModel(n_hidden)
+    elif model_type == "transformer":
+        return TransformerModel(n_hidden)
     else:
         raise ValueError(f"Unknown model_type: {model_type}")
