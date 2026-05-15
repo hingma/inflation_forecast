@@ -58,31 +58,63 @@ def print_error_table(
 
 # ── Figure 7: MSFE over time ──────────────────────────────────────────────────
 
+def _plot_msfe_panel(
+    ax: plt.Axes,
+    model: str,
+    sq_err_dict: dict[str, np.ndarray],
+    origins: pd.DatetimeIndex,
+):
+    se = sq_err_dict[model]            # (N_test,) squared errors at h=1
+    roll = pd.Series(se, index=origins).rolling(12).mean()
+    ax.plot(origins, roll, label=MODEL_STYLES[model]["label"],
+            color=MODEL_STYLES[model]["color"], linewidth=0.8)
+    ax.set_title(MODEL_STYLES[model]["label"])
+    ax.set_ylabel("MSFE (12m rolling)")
+
+
 def plot_msfe_over_time(
     sq_err_dict: dict[str, np.ndarray],
     origins: pd.DatetimeIndex,
     save: bool = True,
 ):
-    """Rolling 12-month MSFE for each model (replicates Figure 7)."""
-    fig, axes = plt.subplots(3, 2, figsize=(12, 9), sharex=True)
-    axes = axes.flatten()
+    """Rolling 12-month MSFE for each model (all lines on one figure -- single panel)."""
+    plt.figure(figsize=(10, 5))
     models = [m for m in MODEL_STYLES if m in sq_err_dict and m != "rw"]
-
-    for ax, m in zip(axes, models):
-        se = sq_err_dict[m]            # (N_test,) squared errors at h=1
+    for m in models:
+        se = sq_err_dict[m]          # (N_test,) squared errors at h=1
         roll = pd.Series(se, index=origins).rolling(12).mean()
-        ax.plot(origins, roll, label=MODEL_STYLES[m]["label"],
-                color=MODEL_STYLES[m]["color"], linewidth=0.8)
-        ax.set_title(MODEL_STYLES[m]["label"])
-        ax.set_ylabel("MSFE (12m rolling)")
-    plt.suptitle("MSFE over time (h=1 step ahead)", fontsize=11)
+        st = MODEL_STYLES[m]
+        plt.plot(origins, roll, label=st["label"], color=st["color"], linewidth=0.9)
+    plt.title("MSFE over time (h=1 step ahead)\n(12-month rolling average)")
+    plt.ylabel("MSFE (12m rolling)")
+    plt.xlabel("Forecast origin")
+    plt.legend(fontsize=8, ncol=2)
     plt.tight_layout()
     if save:
-        fig.savefig(FIG_DIR / "fig7_msfe_over_time.png", dpi=150)
+        plt.savefig(FIG_DIR / "fig7_msfe_over_time.png", dpi=150)
     plt.show()
 
 
 # ── Figure 8/9/10: Real-time forecast path ────────────────────────────────────
+
+def _plot_forecast_path_panel(
+    ax: plt.Axes,
+    fc_dict: dict[str, np.ndarray],
+    y: pd.Series,
+    origin: pd.Timestamp,
+    h_max: int = 12,
+):
+    future_idx = pd.date_range(origin, periods=h_max + 1, freq="MS")[1:]
+    actual_window = y[origin: future_idx[-1]].iloc[:h_max]
+
+    ax.plot(actual_window.index, actual_window.values,
+            "r-", linewidth=1.5, label="Data")
+    for m, fc in fc_dict.items():
+        st = MODEL_STYLES.get(m, dict(label=m, color="black", ls="--"))
+        ax.plot(future_idx[:len(fc)], fc, color=st["color"],
+                ls=st["ls"], linewidth=1, label=st["label"])
+    ax.set_title(f"Forecast from {origin.strftime('%Y-%m')}")
+
 
 def plot_forecast_path(
     fc_dict: dict[str, np.ndarray],   # model → (h_max,) h-step forecasts
@@ -93,19 +125,49 @@ def plot_forecast_path(
     fname: str = "forecast_path.png",
 ):
     """Plot actual vs all model forecasts from one origin (Figures 8–10)."""
-    future_idx = pd.date_range(origin, periods=h_max + 1, freq="MS")[1:]
-    actual_window = y[origin: future_idx[-1]].iloc[:h_max]
-
     fig, ax = plt.subplots(figsize=(8, 4))
-    ax.plot(actual_window.index, actual_window.values,
-            "r-", linewidth=1.5, label="Data")
-    for m, fc in fc_dict.items():
-        st = MODEL_STYLES.get(m, dict(label=m, color="black", ls="--"))
-        ax.plot(future_idx[:len(fc)], fc, color=st["color"],
-                ls=st["ls"], linewidth=1, label=st["label"])
-    ax.set_title(f"Real-time forecast from {origin.strftime('%Y-%m')}")
+    _plot_forecast_path_panel(ax, fc_dict, y, origin, h_max)
     ax.legend(fontsize=7, ncol=3)
     plt.tight_layout()
+    if save:
+        fig.savefig(FIG_DIR / fname, dpi=150)
+    plt.show()
+
+
+def plot_combined_results(
+    sq_err_dict: dict[str, np.ndarray],
+    origins: pd.DatetimeIndex,
+    forecast_snapshots: list[tuple[pd.Timestamp, dict[str, np.ndarray]]],
+    y: pd.Series,
+    h_max: int = 12,
+    save: bool = True,
+    fname: str = "combined_results.png",
+):
+    """
+    Show rolling MSFE for all models in one figure,
+    and optionally sample forecast paths.
+    """
+    import matplotlib.pyplot as plt
+
+    # ── Draw all MSFE lines in a single panel ──
+    fig, ax = plt.subplots(figsize=(10, 6))
+    models = [m for m in MODEL_STYLES if m in sq_err_dict and m != "rw"]
+    for m in models:
+        msfe = sq_err_dict[m]
+        # 12-month rolling average, ignore nan
+        if len(msfe) >= 12:
+            roll = pd.Series(msfe).rolling(12, min_periods=1).mean()
+        else:
+            roll = pd.Series(msfe)
+        style = MODEL_STYLES[m]
+        ax.plot(origins, roll, label=style.get("label", m), color=style.get("color", "black"), ls=style.get("ls", "-"), linewidth=1)
+    ax.set_title("MSFE over time (h=1 step ahead)\n(12-month rolling average)")
+    ax.set_ylabel("MSFE (12m rolling)")
+    ax.set_xlabel("Forecast origin")
+    ax.legend(fontsize=8, ncol=2)
+    ax.grid(True, alpha=0.3)
+
+    fig.tight_layout()
     if save:
         fig.savefig(FIG_DIR / fname, dpi=150)
     plt.show()

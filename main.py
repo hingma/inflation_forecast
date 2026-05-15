@@ -76,6 +76,8 @@ class Cfg:
             self.device = raw_dev
 
         # ── selection ──
+        self.use_self_defined_params = (cli.use_self_defined_params
+                                        or _get(c, "selection", "use_self_defined_params", default=False))
         self.use_paper_params = (cli.use_paper_params
                                  or _get(c, "selection", "use_paper_params", default=False))
         self.quick            = (cli.quick
@@ -84,6 +86,7 @@ class Cfg:
         self.n_cv             = _get(c, "selection", "n_cv",      default=20)
         self.val_frac         = _get(c, "selection", "val_frac",  default=0.10)
         self.top_frac         = _get(c, "selection", "top_frac",  default=0.10)
+        self.user_params      = _get(c, "user_params", default={})
 
         # ── forecasting ──
         self.h_max       = _get(c, "forecasting", "h_max",       default=12)
@@ -110,8 +113,10 @@ def parse_args():
     p.add_argument("--config", default="config.yml",
                    help="Path to YAML config file (default: config.yml)")
     # CLI overrides — all optional; None/False means "use YAML value"
-    p.add_argument("--quick",            action="store_true", default=False)
-    p.add_argument("--use-paper-params", action="store_true", default=False,
+    p.add_argument("--quick",                   action="store_true", default=False)
+    p.add_argument("--use-self-defined-params", action="store_true", default=False,
+                   help="Use user_params from config (highest priority, overrides YAML)")
+    p.add_argument("--use-paper-params",        action="store_true", default=False,
                    help="Use Tables 3-5 best params directly (overrides YAML)")
     p.add_argument("--data-type",  default=None, choices=["sa", "na", "both"])
     p.add_argument("--device",     default=None,
@@ -126,7 +131,7 @@ def run_experiment(y: pd.Series, label: str, cfg: "Cfg", best_params_all: dict):
     """Full pipeline for one inflation series (SA or NA)."""
     from model_selection import select_hyperparams
     from forecasting import rolling_window_forecast, compute_errors, H_MAX
-    from plots import print_error_table, plot_msfe_over_time, plot_forecast_path
+    from plots import print_error_table, plot_combined_results
 
     y_train = y[cfg.train_end if False else "1960-01": cfg.train_end]
 
@@ -134,7 +139,12 @@ def run_experiment(y: pd.Series, label: str, cfg: "Cfg", best_params_all: dict):
     best_params: dict[str, dict] = {}
     params_file = cfg.results_dir / f"best_params_{label}.json"
 
-    if cfg.use_paper_params:
+    if cfg.use_self_defined_params:
+        best_params = {mt: dict(p) for mt, p in cfg.user_params.items()}
+        print(f"\nUsing user-defined hyperparameters:")
+        for mt, p in best_params.items():
+            print(f"  {mt.upper():5s}: {p}")
+    elif cfg.use_paper_params:
         from model_selection import PAPER_BEST_PARAMS
         best_params = dict(PAPER_BEST_PARAMS)
         print(f"\nUsing paper's best hyperparameters:")
@@ -162,6 +172,24 @@ def run_experiment(y: pd.Series, label: str, cfg: "Cfg", best_params_all: dict):
             json.dump(best_params, f, indent=2)
 
     best_params_all[label] = best_params
+
+    # ── 1b. Train and save final models (reused by LRP) ──────────────────────
+    print(f"\nFinal model training [{label}] …")
+    models_dir = cfg.results_dir / "models"
+    for mt in MODEL_TYPES_NN:
+        params = best_params.get(mt, {})
+        if not params:
+            continue
+        model_path = models_dir / f"{mt}_{label}.pt"
+        meta_path  = models_dir / f"{mt}_{label}_meta.json"
+        model, _ = _load_model(model_path, meta_path, cfg.device)
+        if model is not None:
+            print(f"  {mt.upper()}: loaded ← {model_path}")
+        else:
+            _train_and_save_model(
+                mt, y_train.values.astype(np.float32),
+                params, model_path, meta_path, cfg.device,
+            )
 
     # ── 2. Rolling-window forecasting ─────────────────────────────────────────
     print(f"\n{'='*60}")
@@ -232,20 +260,27 @@ def run_experiment(y: pd.Series, label: str, cfg: "Cfg", best_params_all: dict):
                 else:
                     se.append(np.nan)
             sq_err_dict[mt] = np.array(se)
-    plot_msfe_over_time(sq_err_dict, origins, save=cfg.save_figures)
-
-    # ── 5. Sample forecast paths (Figures 8–10 equivalents) ──────────────────
+    # ── 5. Combined figure: MSFE and sample forecast paths ────────────────────
     sample_dates = ["2007-03-01", "2010-07-01", "1996-02-01"]
+    forecast_snapshots = []
     for date_str in sample_dates:
         date = pd.Timestamp(date_str)
         if date not in origins:
             continue
         idx = origins.get_indexer([date], method="nearest")[0]
         fc_at_date = {mt: all_fc[mt][idx] for mt in ALL_MODELS if mt in all_fc}
-        plot_forecast_path(fc_at_date, y, date, save=cfg.save_figures,
-                           fname=f"forecast_{label}_{date_str[:7]}.png")
+        forecast_snapshots.append((date, fc_at_date))
+    plot_combined_results(
+        sq_err_dict,
+        origins,
+        forecast_snapshots,
+        y,
+        h_max=cfg.h_max,
+        save=cfg.save_figures,
+        fname=f"combined_results_{label}.png",
+    )
 
-    return all_fc, origins, best_params, msfe_dict, mafe_dict
+    return best_params
 
 
 # ── Sensitivity analysis ───────────────────────────────────────────────────────
@@ -256,8 +291,20 @@ def run_sensitivity(y_train: np.ndarray, best_params: dict,
     from models import build_model, train_model, model_msfe
     from plots import plot_sensitivity
 
+    sens_cache = cfg.results_dir / f"sensitivity_{label}.pkl"
+
+    if sens_cache.exists():
+        print(f"  Loading cached sensitivity results ← {sens_cache}")
+        with open(sens_cache, "rb") as f:
+            results = pickle.load(f)
+        for mt, param_name, vals, means, lo, hi in results:
+            plot_sensitivity(param_name, vals,
+                             np.array(means), np.array(lo), np.array(hi),
+                             mt + "_" + label, save=cfg.save_figures)
+        return
+
     n_cv  = cfg.sens_n_cv
-    T = len(y_train)
+    T     = len(y_train)
     n_val = max(1, int(T * 0.10))
 
     def cv_score(mt, params_override):
@@ -266,8 +313,7 @@ def run_sensitivity(y_train: np.ndarray, best_params: dict,
         np.random.seed(0)
         for _ in range(n_cv):
             val_start = np.random.randint(T // 4, T - n_val)
-            y_tr = np.concatenate([y_train[:val_start],
-                                   y_train[val_start + n_val:]])
+            y_tr = np.concatenate([y_train[:val_start], y_train[val_start + n_val:]])
             y_va = y_train[val_start: val_start + n_val]
             p = select_lags(y_tr, params.get("infc"), params["max_lag"])
             if mt == "lstm":
@@ -287,98 +333,123 @@ def run_sensitivity(y_train: np.ndarray, best_params: dict,
                 pass
         return np.array(scores) if scores else np.array([np.nan])
 
+    grid = [
+        ("hidden_units",  "n_hidden", [10, 20, 30, 50, 75, 100, 120, 140]),
+        ("learning_rate", "lr",       [0.001, 0.003, 0.005, 0.010, 0.030, 0.050, 0.075, 0.100]),
+        ("n_epochs",      "epochs",   [100, 250, 500, 750, 1000, 1250, 1500, 2000]),
+    ]
+
+    results = []
     for mt in ["nn", "lstm"]:
-        base = best_params.get(mt, {})
-        if not base:
+        if not best_params.get(mt):
             continue
+        for param_name, key, vals in grid:
+            means, lo, hi = [], [], []
+            for v in vals:
+                sc = cv_score(mt, {key: v})
+                means.append(np.nanmean(sc))
+                lo.append(np.nanpercentile(sc, 5))
+                hi.append(np.nanpercentile(sc, 95))
+            results.append((mt, param_name, vals, means, lo, hi))
 
-        # Vary: hidden units
-        hidden_vals = [10, 20, 30, 50, 75, 100, 120, 140]
-        means, lo, hi = [], [], []
-        for n in hidden_vals:
-            sc = cv_score(mt, {"n_hidden": n})
-            means.append(np.nanmean(sc))
-            lo.append(np.nanpercentile(sc, 5))
-            hi.append(np.nanpercentile(sc, 95))
-        plot_sensitivity("hidden_units", hidden_vals,
+    with open(sens_cache, "wb") as f:
+        pickle.dump(results, f)
+    print(f"  Sensitivity results saved → {sens_cache}")
+
+    for mt, param_name, vals, means, lo, hi in results:
+        plot_sensitivity(param_name, vals,
                          np.array(means), np.array(lo), np.array(hi),
                          mt + "_" + label, save=cfg.save_figures)
 
-        # Vary: learning rate
-        lr_vals = [0.001, 0.003, 0.005, 0.010, 0.030, 0.050, 0.075, 0.100]
-        means, lo, hi = [], [], []
-        for lr in lr_vals:
-            sc = cv_score(mt, {"lr": lr})
-            means.append(np.nanmean(sc))
-            lo.append(np.nanpercentile(sc, 5))
-            hi.append(np.nanpercentile(sc, 95))
-        plot_sensitivity("learning_rate", lr_vals,
-                         np.array(means), np.array(lo), np.array(hi),
-                         mt + "_" + label, save=cfg.save_figures)
 
-        # Vary: epochs
-        epoch_vals = [100, 250, 500, 750, 1000, 1250, 1500, 2000]
-        means, lo, hi = [], [], []
-        for ep in epoch_vals:
-            sc = cv_score(mt, {"epochs": ep})
-            means.append(np.nanmean(sc))
-            lo.append(np.nanpercentile(sc, 5))
-            hi.append(np.nanpercentile(sc, 95))
-        plot_sensitivity("n_epochs", epoch_vals,
-                         np.array(means), np.array(lo), np.array(hi),
-                         mt + "_" + label, save=cfg.save_figures)
+# ── Model persistence helpers ─────────────────────────────────────────────────
+def _load_model(model_path: Path, meta_path: Path, device: str):
+    """Return (model, meta) from disk, or (None, None) if not found."""
+    import torch
+    from models import build_model
+    if not (model_path.exists() and meta_path.exists()):
+        return None, None
+    with open(meta_path) as f:
+        meta = json.load(f)
+    model = build_model(meta["model_type"], meta["p"], meta["n_hidden"])
+    model.load_state_dict(torch.load(model_path, map_location="cpu"))
+    model = model.to(device)
+    model.eval()
+    return model, meta
+
+
+def _train_and_save_model(mt: str, y_train: np.ndarray, params: dict,
+                          model_path: Path, meta_path: Path, device: str):
+    """Train model on full training data, save weights + metadata, return (model, meta)."""
+    import torch
+    from data import make_lag_matrix, make_lstm_sequence, select_lags
+    from models import build_model, train_model
+
+    p        = select_lags(y_train, params.get("infc"), params["max_lag"])
+    n_hidden = params.get("n_hidden", 50)
+
+    if mt == "lstm":
+        X, Y = make_lstm_sequence(y_train, p)
+    else:
+        X, Y = make_lag_matrix(y_train, p)
+
+    model = build_model(mt, p, n_hidden)
+    model = train_model(model, X, Y, lr=params["lr"],
+                        epochs=params["epochs"], device=device)
+
+    torch.save(model.state_dict(), model_path)
+    meta = {"model_type": mt, "p": p, "n_hidden": n_hidden}
+    with open(meta_path, "w") as f:
+        json.dump(meta, f, indent=2)
+    print(f"  Model trained and saved → {model_path}")
+    return model, meta
 
 
 # ── LRP analysis ──────────────────────────────────────────────────────────────
 def run_lrp(y: pd.Series, best_params: dict, label: str, cfg: "Cfg"):
-    """Train best NN/LSTM on full training set and plot LRP for two examples."""
+    """Load or train best models on full training set, then run LRP analysis."""
     import torch
-    from data import TRAIN_START, TRAIN_END, make_lag_matrix, make_lstm_sequence, select_lags
-    from models import build_model, train_model, ARModel, NNModel, LSTMModel
+    from data import TRAIN_START, TRAIN_END, make_lag_matrix, make_lstm_sequence
     from lrp import compute_lrp
     from plots import plot_lrp
 
-    y_train = y[TRAIN_START:TRAIN_END].values.astype(np.float32)
+    y_train    = y[TRAIN_START:TRAIN_END].values.astype(np.float32)
     models_dir = cfg.results_dir / "models"
 
     for mt in ["ar", "nn", "lstm"]:
         params = best_params.get(mt)
         if params is None:
             continue
-        p = select_lags(y_train, params.get("infc"), params["max_lag"])
-        if mt == "lstm":
-            X, Y = make_lstm_sequence(y_train, p)
-        else:
-            X, Y = make_lag_matrix(y_train, p)
 
-        model = build_model(mt, p, params.get("n_hidden", 50))
-        from models import train_model
-        model = train_model(model, X, Y, lr=params["lr"],
-                            epochs=params["epochs"], device=cfg.device)
-
-        # Save model weights and metadata for reconstruction
         model_path = models_dir / f"{mt}_{label}.pt"
-        torch.save(model.state_dict(), model_path)
-        meta = {"model_type": mt, "p": p, "n_hidden": params.get("n_hidden", 50), "label": label}
-        with open(models_dir / f"{mt}_{label}_meta.json", "w") as f:
-            json.dump(meta, f, indent=2)
-        print(f"  Model saved as {model_path}")
+        meta_path  = models_dir / f"{mt}_{label}_meta.json"
 
-        # Pick two representative input windows (one mid-series, one end)
+        # ── Training phase: reuse saved weights or train from scratch ─────────
+        model, meta = _load_model(model_path, meta_path, cfg.device)
+        if model is not None:
+            print(f"  Loaded saved model ← {model_path}")
+        else:
+            model, meta = _train_and_save_model(
+                mt, y_train, params, model_path, meta_path, cfg.device
+            )
+
+        p = meta["p"]
+
+        # ── Prediction / LRP phase ────────────────────────────────────────────
+        if mt == "lstm":
+            X, _ = make_lstm_sequence(y_train, p)
+        else:
+            X, _ = make_lag_matrix(y_train, p)
+
         for i, idx in enumerate([len(X) // 2, len(X) - 1]):
             x_inp = X[idx]
-            with __import__("torch").no_grad():
-                import torch
+            with torch.no_grad():
                 xt = torch.tensor(x_inp, dtype=torch.float32).unsqueeze(0)
                 if mt == "lstm":
                     xt = xt.unsqueeze(-1)
                 y_pred = model(xt).item()
-            rel = compute_lrp(model, x_inp, mt)
-            # For plotting: x_input in lag-1-first order
-            if mt == "lstm":
-                x_plot = x_inp[::-1]   # reverse to lag-1 first
-            else:
-                x_plot = x_inp
+            rel    = compute_lrp(model, x_inp, mt)
+            x_plot = x_inp[::-1] if mt == "lstm" else x_inp
             plot_lrp(rel, x_plot, y_pred, mt, p, save=cfg.save_figures,
                      fname_suffix=f"_{label}_ex{i+1}")
 
@@ -397,6 +468,7 @@ def main():
     print(f"  config       : {cli.config}")
     print(f"  device       : {cfg.device}")
     print(f"  data         : {cfg.data_type}")
+    print(f"  self params  : {cfg.use_self_defined_params}")
     print(f"  paper params : {cfg.use_paper_params}")
     print(f"  lrp          : {cfg.lrp_enabled}")
     print(f"  sensitivity  : {cfg.sens_enabled}")
@@ -419,9 +491,8 @@ def main():
     best_params_all = {}
 
     for label, y in datasets.items():
-        all_fc, origins, best_params, msfe_dict, mafe_dict = run_experiment(
-            y, label, cfg, best_params_all
-        )
+        run_experiment(y, label, cfg, best_params_all)
+        best_params = best_params_all[label]
 
         if cfg.sens_enabled:
             print(f"\nSensitivity analysis [{label}] …")
