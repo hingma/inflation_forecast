@@ -1,0 +1,44 @@
+# ============================================================
+# Inflation Forecasting – Experiment Configuration
+# Almosova & Andresen (2023) replication
+# ============================================================
+
+# ── Data ──────────────────────────────────────────────────────
+data:
+  type: both              # 'sa' | 'na' | 'both'
+  cache_dir: "."          # directory to cache cpi_cache.csv
+
+# ── Device ────────────────────────────────────────────────────
+device: auto              # 'auto' | 'cpu' | 'cuda' | 'mps'
+
+# ── Model selection ───────────────────────────────────────────
+selection:
+  use_paper_params: true  # true  → use Tables 3-5 best params directly
+                          # false → run grid search + CV
+  quick: false            # true  → small grid for smoke-testing
+  skip_if_saved: true     # true  → reload results/best_params_<label>.json if present
+  n_cv: 20                # Monte-Carlo CV repetitions
+  val_frac: 0.10          # fraction of training set used as validation
+  top_frac: 0.10          # top fraction kept after Stage-1 pre-training
+
+# ── Forecasting ───────────────────────────────────────────────
+forecasting:
+  h_max: 12               # maximum forecast horizon (months)
+  train_end:  "1989-12"
+  test_start: "1990-01"
+  test_end:   "2020-06"
+
+# ── LRP analysis ──────────────────────────────────────────────
+lrp:
+  enabled: true
+
+# ── Sensitivity analysis ──────────────────────────────────────
+sensitivity:
+  enabled: true
+  n_cv: 20                # MC repetitions per hyperparameter value
+
+# ── Results ───────────────────────────────────────────────────
+results:
+  dir: "results"
+  save_figures: true
+  save_tables:  true
