@@ -137,7 +137,7 @@ def run_experiment(y: pd.Series, label: str, cfg: "Cfg", best_params_all: dict):
     if cfg.use_paper_params:
         from model_selection import PAPER_BEST_PARAMS
         best_params = dict(PAPER_BEST_PARAMS)
-        print(f"\nUsing paper's best hyperparameters (Tables 3–5):")
+        print(f"\nUsing paper's best hyperparameters:")
         for mt, p in best_params.items():
             print(f"  {mt.upper():5s}: {p}")
     elif cfg.skip_if_saved and params_file.exists():
@@ -332,12 +332,14 @@ def run_sensitivity(y_train: np.ndarray, best_params: dict,
 # ── LRP analysis ──────────────────────────────────────────────────────────────
 def run_lrp(y: pd.Series, best_params: dict, label: str, cfg: "Cfg"):
     """Train best NN/LSTM on full training set and plot LRP for two examples."""
+    import torch
     from data import TRAIN_START, TRAIN_END, make_lag_matrix, make_lstm_sequence, select_lags
     from models import build_model, train_model, ARModel, NNModel, LSTMModel
     from lrp import compute_lrp
     from plots import plot_lrp
 
     y_train = y[TRAIN_START:TRAIN_END].values.astype(np.float32)
+    models_dir = cfg.results_dir / "models"
 
     for mt in ["ar", "nn", "lstm"]:
         params = best_params.get(mt)
@@ -353,6 +355,14 @@ def run_lrp(y: pd.Series, best_params: dict, label: str, cfg: "Cfg"):
         from models import train_model
         model = train_model(model, X, Y, lr=params["lr"],
                             epochs=params["epochs"], device=cfg.device)
+
+        # Save model weights and metadata for reconstruction
+        model_path = models_dir / f"{mt}_{label}.pt"
+        torch.save(model.state_dict(), model_path)
+        meta = {"model_type": mt, "p": p, "n_hidden": params.get("n_hidden", 50), "label": label}
+        with open(models_dir / f"{mt}_{label}_meta.json", "w") as f:
+            json.dump(meta, f, indent=2)
+        print(f"  Model saved as {model_path}")
 
         # Pick two representative input windows (one mid-series, one end)
         for i, idx in enumerate([len(X) // 2, len(X) - 1]):
@@ -381,6 +391,7 @@ def main():
 
     cfg.results_dir.mkdir(parents=True, exist_ok=True)
     (cfg.results_dir / "figures").mkdir(exist_ok=True)
+    (cfg.results_dir / "models").mkdir(exist_ok=True)
 
     print(f"\nInflation Forecasting Replication")
     print(f"  config       : {cli.config}")
