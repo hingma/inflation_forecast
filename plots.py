@@ -297,7 +297,7 @@ def plot_lrp(
 
     ax.set_xlabel("Lags")
     ax.set_ylabel("Inflation value")
-    ax.set_title(f"LRP – {model_type.upper()}")
+    ax.set_title(f"LRP – {model_type.upper()}{fname_suffix.replace('_', ' - ')}")
     plt.tight_layout()
     if save:
         fig.savefig(FIG_DIR / "lrp" / f"{label}"/ f"lrp_{model_type}{fname_suffix}.pdf", dpi=150)

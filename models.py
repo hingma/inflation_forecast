@@ -81,6 +81,8 @@ class TransformerModel(nn.Module):
     Input: (batch, seq_len) or (batch, seq_len, 1).
     Output: scalar from mean-pooled encoder output.
     n_hidden must be even (divisible by n_heads=2).
+    Sinusoidal positional encoding is added after input projection so that
+    the encoder can distinguish lag positions (parameter-free, any seq_len).
     Param count ≈ 8 641 at n_hidden=32 (cf. LSTM ≈ 10 651 at n_hidden=50).
     """
     def __init__(self, n_hidden: int):
@@ -97,10 +99,23 @@ class TransformerModel(nn.Module):
         self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=1)
         self.fc = nn.Linear(d_model, 1)
 
+    @staticmethod
+    def _sinusoidal_pe(seq_len: int, d_model: int,
+                       device: torch.device) -> torch.Tensor:
+        """Return (1, seq_len, d_model) sinusoidal positional encoding."""
+        pos = torch.arange(seq_len, device=device).unsqueeze(1).float()
+        i   = torch.arange(0, d_model, 2, device=device).float()
+        div = 10_000 ** (i / d_model)
+        pe  = torch.zeros(seq_len, d_model, device=device)
+        pe[:, 0::2] = torch.sin(pos / div)
+        pe[:, 1::2] = torch.cos(pos / div)
+        return pe.unsqueeze(0)                 # (1, seq_len, d_model)
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if x.dim() == 2:
             x = x.unsqueeze(-1)    # (batch, seq, 1)
         x = self.input_proj(x)     # (batch, seq, d_model)
+        x = x + self._sinusoidal_pe(x.size(1), x.size(2), x.device)
         x = self.encoder(x)        # (batch, seq, d_model)
         x = x.mean(dim=1)          # (batch, d_model)  mean pooling
         return self.fc(x).squeeze(-1)
