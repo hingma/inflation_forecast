@@ -277,7 +277,7 @@ def run_experiment(y: pd.Series, label: str, cfg: "Cfg", best_params_all: dict):
         y,
         h_max=cfg.h_max,
         save=cfg.save_figures,
-        fname=f"combined_results_{label}.png",
+        fname=f"combined_results_{label}.pdf",
     )
 
     return best_params
@@ -407,51 +407,59 @@ def _train_and_save_model(mt: str, y_train: np.ndarray, params: dict,
 
 # ── LRP analysis ──────────────────────────────────────────────────────────────
 def run_lrp(y: pd.Series, best_params: dict, label: str, cfg: "Cfg"):
-    """Load or train best models on full training set, then run LRP analysis."""
+    """Load or train target-specific models, then run LRP analysis."""
     import torch
-    from data import TRAIN_START, TRAIN_END, make_lag_matrix, make_lstm_sequence
-    from lrp import compute_lrp
+    from lrp import (
+        compute_lrp,
+        load_or_train_lrp_model,
+        lrp_target_timestamp,
+        make_lrp_input_for_date,
+    )
     from plots import plot_lrp
 
-    y_train    = y[TRAIN_START:TRAIN_END].values.astype(np.float32)
     models_dir = cfg.results_dir / "models"
+    chosen_months = ["2005-10", "2008-11","1989-10","2000-01" ]             # choose your LRP target months
 
     for mt in ["ar", "nn", "lstm", "transformer"]:
         params = best_params.get(mt)
-        if params is None:
+        if not params:
             continue
 
-        model_path = models_dir / f"{mt}_{label}.pt"
-        meta_path  = models_dir / f"{mt}_{label}_meta.json"
+        for month in chosen_months:
+            target_date = lrp_target_timestamp(month)
+            if target_date not in y.index:
+                print(f"  Skipping {month}: not available in {label} data")
+                continue
 
-        # ── Training phase: reuse saved weights or train from scratch ─────────
-        model, meta = _load_model(model_path, meta_path, cfg.device)
-        if model is not None:
-            print(f"  Loaded saved model ← {model_path}")
-        else:
-            model, meta = _train_and_save_model(
-                mt, y_train, params, model_path, meta_path, cfg.device
-            )
+            # Match rolling real-time timing: only observations before target_date
+            # are available to train the model used for this LRP explanation.
+            try:
+                model, meta = load_or_train_lrp_model(
+                    mt, y, params, label, target_date, models_dir, cfg.device
+                )
+                p = meta["p"]
+                x_inp = make_lrp_input_for_date(y, target_date, p, mt)
+            except ValueError as exc:
+                print(f"  Skipping {month}: {exc}")
+                continue
 
-        p = meta["p"]
-
-        # ── Prediction / LRP phase ────────────────────────────────────────────
-        if mt in ("lstm", "transformer"):
-            X, _ = make_lstm_sequence(y_train, p)
-        else:
-            X, _ = make_lag_matrix(y_train, p)
-
-        for i, idx in enumerate([len(X) // 2, len(X) - 1]):
-            x_inp = X[idx]
             with torch.no_grad():
-                xt = torch.tensor(x_inp, dtype=torch.float32).unsqueeze(0)
+                xt = torch.tensor(x_inp, dtype=torch.float32, device=cfg.device).unsqueeze(0)
                 if mt in ("lstm", "transformer"):
                     xt = xt.unsqueeze(-1)
                 y_pred = model(xt).item()
-            rel    = compute_lrp(model, x_inp, mt)
+
+            rel = compute_lrp(model, x_inp, mt)
             x_plot = x_inp[::-1] if mt in ("lstm", "transformer") else x_inp
-            plot_lrp(rel, x_plot, y_pred, mt, p, save=cfg.save_figures,
-                     fname_suffix=f"_{label}_ex{i+1}")
+
+            month_tag = target_date.strftime("%Y-%m")
+            plot_lrp(
+                rel, x_plot, y_pred, mt, 
+                label,
+                p,
+                save=cfg.save_figures,
+                fname_suffix=f"_{label}_{month_tag}"
+            )
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

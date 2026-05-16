@@ -21,6 +21,23 @@ MODEL_STYLES = {
 }
 
 
+def _origin_range_labels(origins: pd.DatetimeIndex) -> tuple[str, str]:
+    """Return display and filename-safe labels for a forecast-origin range."""
+    if len(origins) == 0:
+        return "unknown", "unknown_origins"
+    start = pd.Timestamp(origins[0]).strftime("%Y-%m")
+    end = pd.Timestamp(origins[-1]).strftime("%Y-%m")
+    return f"{start} to {end}", f"{start}_to_{end}"
+
+
+def _add_origin_range_to_fname(fname: str, origins: pd.DatetimeIndex) -> Path:
+    path = Path(fname)
+    _, range_slug = _origin_range_labels(origins)
+    if range_slug in path.stem:
+        return path
+    return path.with_name(f"{path.stem}_{range_slug}{path.suffix}")
+
+
 # ── Table helpers ─────────────────────────────────────────────────────────────
 
 def print_error_table(
@@ -57,6 +74,47 @@ def print_error_table(
     print("=" * 80)
 
 
+# ── Raw CPI data ───────────────────────────────────────────────────────────────
+
+def plot_raw_cpi_data(
+    csv_path: str | Path = "cpi_cache.csv",
+    columns: tuple[str, ...] = ("sa", "na"),
+    start: str | pd.Timestamp | None = None,
+    end: str | pd.Timestamp | None = None,
+    save: bool = True,
+    fname: str = "raw_cpi_data.pdf",
+):
+    """Plot the raw CPI inflation series cached in cpi_cache.csv."""
+    df = pd.read_csv(csv_path, parse_dates=["observation_date"])
+    df = df.set_index("observation_date").sort_index()
+    if start is not None:
+        df = df.loc[start:]
+    if end is not None:
+        df = df.loc[:end]
+    if df.empty:
+        raise ValueError(f"No CPI observations found between {start} and {end}")
+
+    observation_range, _ = _origin_range_labels(df.index)
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    labels = {"sa": "Seasonally adjusted", "na": "Not seasonally adjusted"}
+    for col in columns:
+        if col not in df:
+            raise ValueError(f"Column '{col}' not found in {csv_path}")
+        ax.plot(df.index, df[col], linewidth=0.9, label=labels.get(col, col))
+
+    ax.axhline(0, color="black", linewidth=0.7, alpha=0.5)
+    ax.set_title(f"Raw CPI Inflation Data\n({observation_range})")
+    ax.set_xlabel("Observation date")
+    ax.set_ylabel("Monthly inflation (%)")
+    ax.legend(fontsize=8)
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+    if save:
+        fig.savefig(FIG_DIR / _add_origin_range_to_fname(fname, df.index), dpi=150)
+    plt.show()
+
+
 # ── Figure 7: MSFE over time ──────────────────────────────────────────────────
 
 def _plot_msfe_panel(
@@ -79,6 +137,7 @@ def plot_msfe_over_time(
     save: bool = True,
 ):
     """Rolling 12-month MSFE for each model (all lines on one figure -- single panel)."""
+    origin_range, _ = _origin_range_labels(origins)
     plt.figure(figsize=(10, 5))
     models = [m for m in MODEL_STYLES if m in sq_err_dict and m != "rw"]
     for m in models:
@@ -86,13 +145,13 @@ def plot_msfe_over_time(
         roll = pd.Series(se, index=origins).rolling(12).mean()
         st = MODEL_STYLES[m]
         plt.plot(origins, roll, label=st["label"], color=st["color"], linewidth=0.9)
-    plt.title("MSFE over time (h=1 step ahead)\n(12-month rolling average)")
+    plt.title(f"MSFE over time (h=1 step ahead)\n(12-month rolling average, origins {origin_range})")
     plt.ylabel("MSFE (12m rolling)")
     plt.xlabel("Forecast origin")
     plt.legend(fontsize=8, ncol=2)
     plt.tight_layout()
     if save:
-        plt.savefig(FIG_DIR / "fig7_msfe_over_time.png", dpi=150)
+        plt.savefig(FIG_DIR / _add_origin_range_to_fname("fig7_msfe_over_time.pdf", origins), dpi=150)
     plt.show()
 
 
@@ -123,7 +182,7 @@ def plot_forecast_path(
     origin: pd.Timestamp,
     h_max: int = 12,
     save: bool = True,
-    fname: str = "forecast_path.png",
+    fname: str = "forecast_path.pdf",
 ):
     """Plot actual vs all model forecasts from one origin (Figures 8–10)."""
     fig, ax = plt.subplots(figsize=(8, 4))
@@ -142,7 +201,7 @@ def plot_combined_results(
     y: pd.Series,
     h_max: int = 12,
     save: bool = True,
-    fname: str = "combined_results.png",
+    fname: str = "combined_results.pdf",
 ):
     """
     Show rolling MSFE for all models in one figure,
@@ -151,6 +210,7 @@ def plot_combined_results(
     import matplotlib.pyplot as plt
 
     # ── Draw all MSFE lines in a single panel ──
+    origin_range, _ = _origin_range_labels(origins)
     fig, ax = plt.subplots(figsize=(10, 6))
     models = [m for m in MODEL_STYLES if m in sq_err_dict and m != "rw"]
     for m in models:
@@ -162,7 +222,7 @@ def plot_combined_results(
             roll = pd.Series(msfe)
         style = MODEL_STYLES[m]
         ax.plot(origins, roll, label=style.get("label", m), color=style.get("color", "black"), ls=style.get("ls", "-"), linewidth=1)
-    ax.set_title("MSFE over time (h=1 step ahead)\n(12-month rolling average)")
+    ax.set_title(f"MSFE over time (h=1 step ahead)\n(12-month rolling average, origins {origin_range})")
     ax.set_ylabel("MSFE (12m rolling)")
     ax.set_xlabel("Forecast origin")
     ax.legend(fontsize=8, ncol=2)
@@ -170,7 +230,7 @@ def plot_combined_results(
 
     fig.tight_layout()
     if save:
-        fig.savefig(FIG_DIR / fname, dpi=150)
+        fig.savefig(FIG_DIR / _add_origin_range_to_fname(fname, origins), dpi=150)
     plt.show()
 
 
@@ -193,7 +253,7 @@ def plot_sensitivity(
     ax.set_title(f"{model_type.upper()} sensitivity – {param_name}")
     plt.tight_layout()
     if save:
-        fig.savefig(FIG_DIR / f"sensitivity_{model_type}_{param_name}.png", dpi=150)
+        fig.savefig(FIG_DIR / f"sensitivity_{model_type}_{param_name}.pdf", dpi=150)
     plt.show()
 
 
@@ -204,6 +264,7 @@ def plot_lrp(
     y_input: np.ndarray,
     y_pred: float,
     model_type: str,
+    label: str,
     p: int,
     save: bool = True,
     fname_suffix: str = "",
@@ -239,5 +300,7 @@ def plot_lrp(
     ax.set_title(f"LRP – {model_type.upper()}")
     plt.tight_layout()
     if save:
-        fig.savefig(FIG_DIR / f"lrp_{model_type}{fname_suffix}.png", dpi=150)
-    plt.show()
+        fig.savefig(FIG_DIR / "lrp" / f"{label}"/ f"lrp_{model_type}{fname_suffix}.pdf", dpi=150)
+    # plt.show()
+
+

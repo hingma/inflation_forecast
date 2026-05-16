@@ -30,32 +30,32 @@ user_params:
     infc: null
     max_lag: 24
     lr: 0.003
-    epochs: 1
+    epochs: 50
   nn:
     n_hidden: 20
-    infc: "bic"
+    infc: null
     max_lag: 12
     lr: 0.001
-    epochs: 1
+    epochs: 50
   lstm:
     n_hidden: 50
     infc: null
     max_lag: 24
     lr: 0.001
-    epochs: 1
+    epochs: 1000
   transformer:
     n_hidden: 32
     infc: null
     max_lag: 24
     lr: 0.001
-    epochs: 1
+    epochs: 1000
 
 # ── Forecasting ───────────────────────────────────────────────
 forecasting:
   h_max: 12               # maximum forecast horizon (months)
   train_end:  "1989-12"
-  test_start: "1990-01"
-  test_end:   "2020-06"
+  test_start: "2000-01"
+  test_end:   "2010-06"
 
 # ── LRP analysis ──────────────────────────────────────────────
 lrp:
