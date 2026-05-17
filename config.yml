@@ -34,7 +34,7 @@ user_params:
   nn:
     n_hidden: 20
     infc: null
-    max_lag: 12
+    max_lag: 24
     lr: 0.001
     epochs: 50
   lstm:
@@ -48,18 +48,18 @@ user_params:
     infc: null
     max_lag: 24
     lr: 0.001
-    epochs: 100
+    epochs: 50
 
 # ── Forecasting ───────────────────────────────────────────────
 forecasting:
   h_max: 12               # maximum forecast horizon (months)
   train_end:  "1989-12"
-  test_start: "2000-01"
-  test_end:   "2010-06"
+  test_start: "1995-01"
+  test_end:   "2015-06"
 
 # ── LRP analysis ──────────────────────────────────────────────
 lrp:
-  enabled: false
+  enabled: true
 
 # ── Sensitivity analysis ──────────────────────────────────────
 sensitivity:

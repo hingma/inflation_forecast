@@ -4,6 +4,7 @@
     // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
+        
     
         {
             "name": "Python Debugger: main.py",
@@ -11,6 +12,23 @@
             "request": "launch",
             "program": "main.py",
             "console": "integratedTerminal"
+        },
+        {
+            "name": "Python Debugger: experiment_pe.py",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "experiment_pe.py",
+            "console": "integratedTerminal",
+            "args": ["--both"]
+        },
+        {
+            "name":"Python Debugger: experiment_all_models.py",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "experiment_all_models.py",
+            "console": "integratedTerminal",
+            "args": ["--snapshot","2010-07",  "--rolling-start", "2005-01", "--rolling-end", "2012-01"]
         }
+        
     ]
 }
