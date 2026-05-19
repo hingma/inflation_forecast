@@ -28,6 +28,9 @@ PAPER_BEST_PARAMS: dict[str, dict] = {
     "nn":          {"n_hidden": 20, "infc": "bic", "max_lag": 12, "lr": 0.001, "epochs": 500},
     "lstm":        {"n_hidden": 50, "infc": None,  "max_lag": 24, "lr": 0.001, "epochs": 2000},
     "transformer": {"n_hidden": 32, "infc": None,  "max_lag": 24, "lr": 0.001, "epochs": 1000},
+    "tf_nope":     {"n_hidden": 32, "infc": None,  "max_lag": 24, "lr": 0.001, "epochs": 1000},
+    "tf_abspe":    {"n_hidden": 32, "infc": None,  "max_lag": 24, "lr": 0.001, "epochs": 1000},
+    "tf_relpe":    {"n_hidden": 32, "infc": None,  "max_lag": 24, "lr": 0.001, "epochs": 1000},
 }
 
 
@@ -55,6 +58,27 @@ GRIDS: dict[str, dict[str, list]] = {
         "epochs":   [500, 1000, 1500, 2000],
     },
     "transformer": {
+        "n_hidden": [16, 24, 32],
+        "infc":     [None, "bic"],
+        "max_lag":  [12, 24],
+        "lr":       [0.001, 0.003, 0.010, 0.050],
+        "epochs":   [500, 1000, 1500, 2000],
+    },
+    "tf_nope": {
+        "n_hidden": [16, 24, 32],
+        "infc":     [None, "bic"],
+        "max_lag":  [12, 24],
+        "lr":       [0.001, 0.003, 0.010, 0.050],
+        "epochs":   [500, 1000, 1500, 2000],
+    },
+    "tf_abspe": {
+        "n_hidden": [16, 24, 32],
+        "infc":     [None, "bic"],
+        "max_lag":  [12, 24],
+        "lr":       [0.001, 0.003, 0.010, 0.050],
+        "epochs":   [500, 1000, 1500, 2000],
+    },
+    "tf_relpe": {
         "n_hidden": [16, 24, 32],
         "infc":     [None, "bic"],
         "max_lag":  [12, 24],
@@ -92,6 +116,27 @@ QUICK_GRIDS: dict[str, dict[str, list]] = {
         "lr":       [0.001, 0.010],
         "epochs":   [500, 1000],
     },
+    "tf_nope": {
+        "n_hidden": [16, 32],
+        "infc":     [None, "bic"],
+        "max_lag":  [12, 24],
+        "lr":       [0.001, 0.010],
+        "epochs":   [500, 1000],
+    },
+    "tf_abspe": {
+        "n_hidden": [16, 32],
+        "infc":     [None, "bic"],
+        "max_lag":  [12, 24],
+        "lr":       [0.001, 0.010],
+        "epochs":   [500, 1000],
+    },
+    "tf_relpe": {
+        "n_hidden": [16, 32],
+        "infc":     [None, "bic"],
+        "max_lag":  [12, 24],
+        "lr":       [0.001, 0.010],
+        "epochs":   [500, 1000],
+    },
 }
 
 
@@ -102,8 +147,11 @@ def _param_combos(grid: dict[str, list]) -> list[dict]:
     return [dict(zip(keys, vals)) for vals in itertools.product(*grid.values())]
 
 
+_SEQ_MODELS = ("lstm", "transformer", "tf_nope", "tf_abspe", "tf_relpe")
+
+
 def _make_features(y: np.ndarray, p: int, model_type: str):
-    if model_type in ("lstm", "transformer"):
+    if model_type in _SEQ_MODELS:
         return make_lstm_sequence(y, p)
     return make_lag_matrix(y, p)
 
@@ -124,7 +172,7 @@ def _fit_and_score(model_type: str, params: dict,
     X_va = X_va[-len(y_val):]
     Y_va = Y_va[-len(y_val):]
 
-    model = build_model(model_type, p, n_hidden)
+    model = build_model(model_type, p, n_hidden, max_len=p + 1)
     model = train_model(model, X_tr, Y_tr, lr=params["lr"],
                         epochs=params["epochs"], device=device)
     msfe = model_msfe(model, X_va, Y_va, device)
@@ -158,7 +206,7 @@ def select_hyperparams(
     for i, params in enumerate(combos):
         p = select_lags(y_train, params.get("infc"), params["max_lag"])
         X, Y = _make_features(y_train, p, model_type)
-        model = build_model(model_type, p, params.get("n_hidden", 50))
+        model = build_model(model_type, p, params.get("n_hidden", 50), max_len=p + 1)
         model = train_model(model, X, Y, lr=params["lr"],
                             epochs=params["epochs"], device=device)
         rmsfe = float(np.sqrt(model_msfe(model, X, Y, device)))

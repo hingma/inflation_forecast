@@ -163,7 +163,8 @@ def model_msfe(model: nn.Module, X: np.ndarray, Y: np.ndarray,
     return float(np.mean((preds - Y) ** 2))
 
 
-def build_model(model_type: str, p: int, n_hidden: int = 50) -> nn.Module:
+def build_model(model_type: str, p: int, n_hidden: int = 50,
+                max_len: int | None = None) -> nn.Module:
     if model_type == "ar":
         return ARModel(p)
     elif model_type == "nn":
@@ -172,5 +173,15 @@ def build_model(model_type: str, p: int, n_hidden: int = 50) -> nn.Module:
         return LSTMModel(n_hidden)
     elif model_type == "transformer":
         return TransformerModel(n_hidden)
+    elif model_type in ("tf_nope", "tf_abspe", "tf_relpe"):
+        from experiment_pe import (NoPETransformer, AbsolutePETransformer,
+                                   RelativePETransformer)
+        _max_len = max_len if max_len is not None else p + 1
+        if model_type == "tf_nope":
+            return NoPETransformer(n_hidden)
+        elif model_type == "tf_abspe":
+            return AbsolutePETransformer(n_hidden)
+        else:
+            return RelativePETransformer(n_hidden, max_len=_max_len)
     else:
         raise ValueError(f"Unknown model_type: {model_type}")

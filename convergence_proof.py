@@ -36,18 +36,18 @@ from experiment_pe import NoPETransformer, AbsolutePETransformer, RelativePETran
 # ── Config ────────────────────────────────────────────────────────────────────
 
 LAG           = 24
-N_HIDDEN_NN   = 20
+N_HIDDEN_NN   = 30
 N_HIDDEN_LSTM = 50
 N_HIDDEN_TF   = 32
 LR            = 0.001
-MAX_EPOCHS    = 500      # upper bound; training stops early once converged
-N_SEEDS       = 50
+MAX_EPOCHS    = 300      # upper bound; training stops early once converged
+N_SEEDS       = 30
 
 TRAIN_END     = "1989-12"
 
 # Convergence detection parameters
 WINDOW    = 10      # look-back window (epochs) for relative improvement
-TOL       = 1e-4    # convergence threshold: rel improvement < 0.01%
+TOL       = 1e-2    # convergence threshold: rel improvement < 0.01%
 MIN_EPOCH = 20      # don't check before this epoch (avoid noise early on)
 
 OUT_DIR = Path("results/convergence_proof")

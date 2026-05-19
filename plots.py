@@ -170,6 +170,8 @@ def _plot_forecast_path_panel(
     ax.plot(actual_window.index, actual_window.values,
             "r-", linewidth=1.5, label="Data")
     for m, fc in fc_dict.items():
+        if m in ["nn", "sa"]:
+            continue
         st = MODEL_STYLES.get(m, dict(label=m, color="black", ls="--"))
         ax.plot(future_idx[:len(fc)], fc, color=st["color"],
                 ls=st["ls"], linewidth=1, label=st["label"])
@@ -301,6 +303,81 @@ def plot_lrp(
     plt.tight_layout()
     if save:
         fig.savefig(FIG_DIR / "lrp" / f"{label}"/ f"lrp_{model_type}{fname_suffix}.pdf", dpi=150)
+    # plt.show()
+
+
+def plot_lrp_combined(
+    records: list[dict],
+    label: str,
+    save: bool = True,
+):
+    """
+    Combined LRP figure: rows = models, columns = chosen months.
+
+    Each element of `records` is a dict with keys:
+        model_type, month_tag, relevances, y_input, y_pred, p
+    where y_input is already in plotting order (lag-p on left, lag-1 on right).
+    """
+    # model_order = ["ar", "nn", "lstm", "tf_nope", "tf_abspe", "tf_relpe"]
+
+    model_order = ["ar", "lstm", "tf_nope", "tf_abspe", "tf_relpe"]
+    model_labels = {
+        "ar": "AR", "nn": "NN", "lstm": "LSTM",
+        "tf_nope": "TF-NoPE", "tf_abspe": "TF-AbsPE", "tf_relpe": "TF-RelPE",
+    }
+
+    months = sorted({r["month_tag"] for r in records})
+    models = [m for m in model_order if any(r["model_type"] == m for r in records)]
+
+    n_rows, n_cols = len(models), len(months)
+    fig, axes = plt.subplots(
+        n_rows, n_cols,
+        figsize=(4.5 * n_cols, 3.0 * n_rows),
+        squeeze=False,
+    )
+
+    for row, mt in enumerate(models):
+        for col, month in enumerate(months):
+            ax = axes[row][col]
+            match = [r for r in records if r["model_type"] == mt and r["month_tag"] == month]
+            if not match:
+                ax.set_visible(False)
+                continue
+            r = match[0]
+
+            rel = r["relevances"]
+            # Normalise to oldest-first so rel[0] = lag-p relevance lines up
+            # with lags[0] = -p+1 (lag-p position).
+            # AR/NN: compute_lrp returns newest-first → flip.
+            # LSTM/tf_*: compute_lrp returns oldest-first → keep as-is.
+            if mt in ("ar", "nn"):
+                rel = rel[::-1]
+
+            p = r["p"]
+            lags = np.arange(-p + 1, 1)
+            colors = ["tomato" if v > 0 else "steelblue" for v in rel]
+            alphas = np.abs(rel) / (np.abs(rel).max() + 1e-9)
+
+            # y_input (x_plot) is always newest-first → reverse for oldest-first display.
+            ax.plot(lags, r["y_input"][::-1], "k-", linewidth=1.2)
+            ax.axhline(r["y_pred"], color="k", ls="--", linewidth=0.8, alpha=0.6)
+            for lag, v, a, c in zip(lags, rel, alphas, colors):
+                ax.axvspan(lag - 0.5, lag + 0.5, alpha=float(a) * 0.6, color=c, zorder=0)
+
+            if row == 0:
+                ax.set_title(month, fontsize=10)
+            if col == 0:
+                ax.set_ylabel(model_labels.get(mt, mt.upper()), fontsize=9)
+            if row == n_rows - 1:
+                ax.set_xlabel("Lags", fontsize=8)
+            ax.tick_params(labelsize=7)
+
+    fig.suptitle(f"LRP – {label}", fontsize=12, y=1.01)
+    plt.tight_layout()
+    if save:
+        out = FIG_DIR / "lrp" / label / f"lrp_combined_{label}_{"_".join(months)}.pdf"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(out, dpi=150, bbox_inches="tight")
     # plt.show()
 
 

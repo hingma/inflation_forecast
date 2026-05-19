@@ -96,7 +96,7 @@ TEST_START = "1995-01"
 TEST_END   = "2015-06"
 H_MAX      = 12
 SEED       = 42
-OUT_DIR    = Path("results/all_models")
+OUT_DIR    = Path("results/all_models_excluded")
 
 # ── Per-model hyperparameters (matches config.yml user_params) ────────────────
 _AR_PARAMS   = dict(max_lag=24, lr=0.003, epochs=50)
@@ -124,13 +124,13 @@ REGISTRY: dict[str, dict] = {
         factory=lambda p: ARModel(p),
         params=_AR_PARAMS,
     ),
-    "NN": dict(
-        display="NN",
-        group="baseline",
-        seq=False,
-        factory=lambda p: NNModel(p, n_hidden=_NN_PARAMS["n_hidden"]),
-        params=_NN_PARAMS,
-    ),
+    # "NN": dict(
+    #     display="NN",
+    #     group="baseline",
+    #     seq=False,
+    #     factory=lambda p: NNModel(p, n_hidden=_NN_PARAMS["n_hidden"]),
+    #     params=_NN_PARAMS,
+    # ),
     "LSTM": dict(
         display="LSTM",
         group="baseline",

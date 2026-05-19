@@ -166,7 +166,7 @@ def compute_lrp(model: nn.Module, x: np.ndarray,
         return lrp_nn(model, x)
     elif model_type == "lstm":
         return lrp_lstm(model, x)
-    elif model_type == "transformer":
+    elif model_type in ("transformer", "tf_nope", "tf_abspe", "tf_relpe"):
         return lrp_transformer(model, x)
     else:
         raise ValueError(f"Unknown model_type: {model_type}")
@@ -198,7 +198,8 @@ def _load_lrp_model(model_path: Path, meta_path: Path, device: str):
         return None, None
     with open(meta_path) as f:
         meta = json.load(f)
-    model = build_model(meta["model_type"], meta["p"], meta["n_hidden"])
+    model = build_model(meta["model_type"], meta["p"], meta["n_hidden"],
+                        max_len=meta["p"] + 1)
     model.load_state_dict(torch.load(model_path, map_location="cpu"))
     model = model.to(device)
     model.eval()
@@ -221,12 +222,12 @@ def _train_and_save_lrp_model(model_type: str, y_train: np.ndarray, params: dict
             f"to train {model_type.upper()} with p={p}"
         )
 
-    if model_type in ("lstm", "transformer"):
+    if model_type in ("lstm", "transformer", "tf_nope", "tf_abspe", "tf_relpe"):
         X, Y = make_lstm_sequence(y_train, p)
     else:
         X, Y = make_lag_matrix(y_train, p)
 
-    model = build_model(model_type, p, n_hidden)
+    model = build_model(model_type, p, n_hidden, max_len=p + 1)
     model = train_model(model, X, Y, lr=params["lr"],
                         epochs=params["epochs"], device=device)
 
@@ -276,7 +277,7 @@ def make_lrp_input_for_date(y: pd.Series, target_date: pd.Timestamp,
             f"to build an LRP input with p={p}"
         )
     x_recent = y_avail[-p:]
-    if model_type in ("lstm", "transformer"):
+    if model_type in ("lstm", "transformer", "tf_nope", "tf_abspe", "tf_relpe"):
         return x_recent.astype(np.float32)
     return x_recent[::-1].astype(np.float32)
 

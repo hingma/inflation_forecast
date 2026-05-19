@@ -140,17 +140,20 @@ def ms_ar_forecast(y_past: np.ndarray, h_max: int = H_MAX,
 
 # ── Per-origin one-step training + h-step forecast ───────────────────────────
 
+_SEQ_MODELS = ("lstm", "transformer", "tf_nope", "tf_abspe", "tf_relpe")
+
+
 def _nn_forecast_at_origin(model_type: str, params: dict,
                            y_avail: np.ndarray,
                            device: str = "cpu") -> np.ndarray:
     p = select_lags(y_avail, params.get("infc"), params["max_lag"])
-    seq_model = model_type in ("lstm", "transformer")
+    seq_model = model_type in _SEQ_MODELS
     if seq_model:
         X, Y = make_lstm_sequence(y_avail, p)
     else:
         X, Y = make_lag_matrix(y_avail, p)
 
-    model = build_model(model_type, p, params.get("n_hidden", 50))
+    model = build_model(model_type, p, params.get("n_hidden", 50), max_len=p + 1)
     model = train_model(model, X, Y, lr=params["lr"],
                         epochs=params["epochs"], device=device)
 

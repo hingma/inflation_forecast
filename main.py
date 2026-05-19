@@ -29,7 +29,7 @@ RESULTS = Path("results")
 RESULTS.mkdir(exist_ok=True)
 (RESULTS / "figures").mkdir(exist_ok=True)
 
-MODEL_TYPES_NN   = ["ar", "nn", "lstm", "transformer"]
+MODEL_TYPES_NN   = ["ar", "nn", "lstm", "tf_nope", "tf_abspe", "tf_relpe"]
 MODEL_TYPES_BENCH = ["rw", "sarima", "ms_ar"]
 ALL_MODELS       = MODEL_TYPES_NN + MODEL_TYPES_BENCH
 
@@ -316,7 +316,7 @@ def run_sensitivity(y_train: np.ndarray, best_params: dict,
             y_tr = np.concatenate([y_train[:val_start], y_train[val_start + n_val:]])
             y_va = y_train[val_start: val_start + n_val]
             p = select_lags(y_tr, params.get("infc"), params["max_lag"])
-            if mt in ("lstm", "transformer"):
+            if mt in ("lstm", "transformer", "tf_nope", "tf_abspe", "tf_relpe"):
                 X_tr, Y_tr = make_lstm_sequence(y_tr, p)
                 X_full, Y_full = make_lstm_sequence(np.concatenate([y_tr, y_va]), p)
             else:
@@ -325,7 +325,7 @@ def run_sensitivity(y_train: np.ndarray, best_params: dict,
             X_va = X_full[-len(y_va):]
             Y_va = Y_full[-len(y_va):]
             try:
-                m = build_model(mt, p, params.get("n_hidden", 50))
+                m = build_model(mt, p, params.get("n_hidden", 50), max_len=p + 1)
                 m = train_model(m, X_tr, Y_tr, lr=params["lr"],
                                 epochs=params["epochs"], device=cfg.device)
                 scores.append(np.sqrt(model_msfe(m, X_va, Y_va, cfg.device)))
@@ -340,7 +340,7 @@ def run_sensitivity(y_train: np.ndarray, best_params: dict,
     ]
 
     results = []
-    for mt in ["nn", "lstm", "transformer"]:
+    for mt in ["nn", "lstm", "tf_nope", "tf_abspe", "tf_relpe"]:
         if not best_params.get(mt):
             continue
         for param_name, key, vals in grid:
@@ -388,12 +388,12 @@ def _train_and_save_model(mt: str, y_train: np.ndarray, params: dict,
     p        = select_lags(y_train, params.get("infc"), params["max_lag"])
     n_hidden = params.get("n_hidden", 50)
 
-    if mt in ("lstm", "transformer"):
+    if mt in ("lstm", "transformer", "tf_nope", "tf_abspe", "tf_relpe"):
         X, Y = make_lstm_sequence(y_train, p)
     else:
         X, Y = make_lag_matrix(y_train, p)
 
-    model = build_model(mt, p, n_hidden)
+    model = build_model(mt, p, n_hidden, max_len=p + 1)
     model = train_model(model, X, Y, lr=params["lr"],
                         epochs=params["epochs"], device=device)
 
@@ -415,12 +415,17 @@ def run_lrp(y: pd.Series, best_params: dict, label: str, cfg: "Cfg"):
         lrp_target_timestamp,
         make_lrp_input_for_date,
     )
-    from plots import plot_lrp
+    from plots import plot_lrp, plot_lrp_combined
 
     models_dir = cfg.results_dir / "models"
-    chosen_months = ["2005-10", "2008-11","1989-10","2000-01" ]             # choose your LRP target months
+    chosen_months = [ "2000-01", "1989-10"]
 
-    for mt in ["ar", "nn", "lstm", "transformer"]:
+    # chosen_months = ["1996-02", "2007-03", "2010-07","2005-10", "2008-11","1989-10","2000-01"]
+    # chosen_months = ["2005-10", "2008-11","1989-10","2000-01" ]             # choose your LRP target months
+
+    lrp_records = []  # collected for the combined plot
+
+    for mt in ["ar", "nn", "lstm", "tf_nope", "tf_abspe", "tf_relpe"]:
         params = best_params.get(mt)
         if not params:
             continue
@@ -445,21 +450,29 @@ def run_lrp(y: pd.Series, best_params: dict, label: str, cfg: "Cfg"):
 
             with torch.no_grad():
                 xt = torch.tensor(x_inp, dtype=torch.float32, device=cfg.device).unsqueeze(0)
-                if mt in ("lstm", "transformer"):
+                if mt in ("lstm", "transformer", "tf_nope", "tf_abspe", "tf_relpe"):
                     xt = xt.unsqueeze(-1)
                 y_pred = model(xt).item()
 
             rel = compute_lrp(model, x_inp, mt)
-            x_plot = x_inp[::-1] if mt in ("lstm", "transformer") else x_inp
+            x_plot = x_inp[::-1] if mt in ("lstm", "transformer", "tf_nope", "tf_abspe", "tf_relpe") else x_inp
 
             month_tag = target_date.strftime("%Y-%m")
             plot_lrp(
-                rel, x_plot, y_pred, mt, 
+                rel, x_plot, y_pred, mt,
                 label,
                 p,
                 save=cfg.save_figures,
                 fname_suffix=f"_{label}_{month_tag}"
             )
+
+            lrp_records.append(dict(
+                model_type=mt, month_tag=month_tag,
+                relevances=rel, y_input=x_plot, y_pred=y_pred, p=p,
+            ))
+
+    if lrp_records:
+        plot_lrp_combined(lrp_records, label, save=cfg.save_figures)
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
