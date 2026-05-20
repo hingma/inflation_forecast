@@ -96,13 +96,19 @@ def lrp_lstm(model: LSTMModel, x: np.ndarray) -> np.ndarray:
               To align with paper's plotting convention (lag-1 on right),
               reverse this array before plotting.
     """
-    model.eval()
+    # cuDNN LSTM backward requires training mode; no dropout so forward is unchanged.
+    was_training = model.training
+    model.train()
     device = _model_device(model)
     xt = torch.tensor(x, dtype=torch.float32, device=device).unsqueeze(0).unsqueeze(-1)
     xt.requires_grad_(True)
 
-    out = model(xt)
-    out.backward()
+    try:
+        out = model(xt)
+        out.backward()
+    finally:
+        if not was_training:
+            model.eval()
 
     grad = xt.grad.detach().squeeze().cpu().numpy()   # (p,)
     inp  = x                                    # (p,)

@@ -47,7 +47,7 @@ from experiment_pe import NoPETransformer, AbsolutePETransformer, RelativePETran
 
 LAG       = 24
 VAL_FRAC  = 0.20      # last 20 % of 1960-1989 used as validation
-MAX_EPOCHS = 300
+MAX_EPOCHS = 200
 N_SEEDS   = 10
 TRAIN_END = "1989-12"
 
@@ -62,7 +62,7 @@ REGISTRY = [
     ("NN",       lambda: NNModel(p=LAG, n_hidden=20),                             50,  0.001, False),
     ("LSTM",     lambda: LSTMModel(n_hidden=50),                                  100, 0.001, True),
     ("TF-NoPE",  lambda: NoPETransformer(n_hidden=32),                            50,  0.001, True),
-    ("TF-AbsPE", lambda: AbsolutePETransformer(n_hidden=32),                      50,  0.001, True),
+    ("TF-AbsPE", lambda: AbsolutePETransformer(n_hidden=32),                      100,  0.001, True),
     ("TF-RelPE", lambda: RelativePETransformer(n_hidden=32, max_len=LAG + 1),     50,  0.001, True),
 ]
 
@@ -315,6 +315,9 @@ def plot_combined_curves(results: dict):
         fontsize=10,
     )
 
+    abs_vals = []
+    rel_vals = []
+
     for name, factory, config_ep, lr, seq in REGISTRY:
         r   = results[name]
         c   = STYLES[name]["color"]
@@ -325,6 +328,7 @@ def plot_combined_curves(results: dict):
         val_q75 = np.percentile(r["val_mat"], 75, axis=0)
 
         # ── Left panel: raw val MSE ───────────────────────────────────────────
+        abs_vals.extend([val_q25, val_q75, val_med])
         ax_abs.fill_between(epochs, val_q25, val_q75, color=c, alpha=0.10)
         ax_abs.plot(epochs, val_med, color=c, lw=1.6, ls=ls,
                     label=f"{name} (ep={config_ep})")
@@ -336,6 +340,7 @@ def plot_combined_curves(results: dict):
         rel_med    = val_med / norm
         rel_q25    = val_q25 / norm
         rel_q75    = val_q75 / norm
+        rel_vals.extend([rel_q25, rel_q75, rel_med])
         ax_rel.fill_between(epochs, rel_q25, rel_q75, color=c, alpha=0.10)
         ax_rel.plot(epochs, rel_med, color=c, lw=1.6, ls=ls,
                     label=f"{name} (ep={config_ep})")
@@ -359,6 +364,17 @@ def plot_combined_curves(results: dict):
         ax.set_xlim(1, MAX_EPOCHS)
         ax.legend(fontsize=8, loc="upper right")
         ax.grid(True, alpha=0.3)
+
+    # Zoom both y-axes to the dense region (robust to extreme outliers).
+    def _set_robust_ylim(ax, values):
+        vals = np.concatenate([np.ravel(v) for v in values])
+        y_lo, y_hi = np.percentile(vals, [1, 98])
+        span = max(y_hi - y_lo, 1e-12)
+        pad = 0.08 * span
+        ax.set_ylim(y_lo - pad, y_hi + pad)
+
+    _set_robust_ylim(ax_abs, abs_vals)
+    _set_robust_ylim(ax_rel, rel_vals)
 
     fig.tight_layout()
     out = OUT_DIR / "val_mse_combined.pdf"
